@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MD Editor - Modern Markdown Editor</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/dark.css">
+</head>
+<body class="dark-theme">
+  <div class="app-container">
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button id="new-file" title="New File (Ctrl+N)">📄 New</button>
+        <button id="open-file" title="Open File (Ctrl+O)">📂 Open</button>
+        <button id="save-file" title="Save (Ctrl+S)">💾 Save</button>
+        <button id="save-as-file" title="Save As (Ctrl+Shift+S)">💾 Save As</button>
+      </div>
+      <div class="toolbar-group format-buttons">
+        <button id="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button id="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button id="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+        <button id="strikethrough" title="Strikethrough"><s>S</s></button>
+        <button id="highlight" title="Highlight Text">🖍️</button>
+      </div>
+      <div class="toolbar-group format-buttons">
+        <button id="h1" title="Heading 1">H1</button>
+        <button id="h2" title="Heading 2">H2</button>
+        <button id="h3" title="Heading 3">H3</button>
+      </div>
+      <div class="toolbar-group format-buttons">
+        <button id="code-inline" title="Inline Code"><></button>
+        <button id="code-block" title="Code Block">{ }</button>
+        <button id="blockquote" title="Blockquote">❝</button>
+        <button id="horizontal-rule" title="Horizontal Rule">—</button>
+      </div>
+      <div class="toolbar-group format-buttons">
+        <button id="link" title="Insert Link">🔗</button>
+        <button id="image" title="Insert Image">🖼️</button>
+        <button id="table" title="Insert Table">▦</button>
+        <button id="checkbox" title="Checkbox List">☑</button>
+      </div>
+      <div class="toolbar-group format-buttons">
+        <button id="ul" title="Unordered List">• List</button>
+        <button id="ol" title="Ordered List">1. List</button>
+      </div>
+      <div class="toolbar-group">
+        <button id="toggle-source" title="Toggle Source Editor">{⌨} Source</button>
+        <button id="toggle-theme" title="Toggle Theme">🌙</button>
+        <button id="toggle-lang" title="切换语言">🌐 中文</button>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="main-content">
+      <!-- Editor Panel -->
+      <div class="editor-panel" id="editor-panel">
+        <textarea id="editor" placeholder="Start typing your Markdown here..." spellcheck="false"></textarea>
+      </div>
+
+      <!-- Divider (for resize) -->
+      <div class="divider" id="divider"></div>
+
+      <!-- Preview Panel -->
+      <div class="preview-panel" id="preview-panel">
+        <div id="preview" class="markdown-preview"></div>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <span id="file-status">Ready</span>
+      <span id="line-count">Line: 1, Col: 1</span>
+      <span id="word-count">Words: 0</span>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/turndown/dist/turndown.min.js"></script>
+  <script src="renderer.js"></script>
