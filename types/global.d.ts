@@ -27,7 +27,7 @@ interface ElectronAPI {
   getCurrentFile: () => Promise<string | null>;
   setCurrentFile: (filePath: string) => Promise<{ success: boolean }>;
   resizeWindow: (width: number, height: number) => Promise<void>;
-  selectImage: () => Promise<string | null>;
+  selectImage: () => Promise<{ filePath: string; base64: string; fileName: string } | null>;
 }
 
 interface Window {

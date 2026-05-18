@@ -101,10 +101,33 @@ ipcMain.handle('select-image', async () => {
     properties: ['openFile'],
   });
   if (!result.canceled && result.filePaths.length > 0) {
-    return result.filePaths[0];
+    const filePath = result.filePaths[0];
+    // Read image file and convert to base64 for preview display
+    const imageBuffer = fs.readFileSync(filePath);
+    const ext = filePath.split('.').pop()?.toLowerCase() || 'png';
+    const mimeType = getImageMimeType(ext);
+    const base64 = imageBuffer.toString('base64');
+    return {
+      filePath,
+      base64: `data:${mimeType};base64,${base64}`,
+      fileName: filePath.split(path.sep).pop() || 'image',
+    };
   }
   return null;
 });
+
+function getImageMimeType(ext: string): string {
+  const mimeTypes: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    bmp: 'image/bmp',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+  };
+  return mimeTypes[ext] || 'image/png';
+}
 
 // --- Word-style close confirmation ---
 

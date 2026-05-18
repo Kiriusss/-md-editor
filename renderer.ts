@@ -417,14 +417,13 @@ function insertLinkMd(): void {
 
 async function insertImageMd(): Promise<void> {
   // Open file dialog to select a local image
-  const imagePath = await selectImage();
-  if (!imagePath) return;
+  const imageInfo = await selectImage();
+  if (!imageInfo) return;
 
   editor.focus();
   const start = editor.selectionStart;
-  // Use relative path if image is in the same directory as current file, otherwise use absolute path
-  const altText = imagePath.split(pathSep).pop() || 'image';
-  const template = `![${altText}](${imagePath})`;
+  // Use base64 data URI for preview, keep file path in source
+  const template = `![](${imageInfo.base64})`;
   editor.value = editor.value.substring(0, start) + template + editor.value.substring(editor.selectionEnd);
   editor.selectionStart = editor.selectionEnd = start + template.length;
   if (!beginSync()) return;
@@ -434,8 +433,6 @@ async function insertImageMd(): Promise<void> {
     endSync();
   }
 }
-
-const pathSep = navigator.platform.includes('Win') ? '\\' : '/';
 
 function insertTableMd(): void {
   insertAtCursor(`| Header 1 | Header 2 | Header 3 |
