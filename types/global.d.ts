@@ -31,4 +31,7 @@ interface ElectronAPI {
 
 interface Window {
   electronAPI: ElectronAPI;
+  __isDirty: boolean;
+  syncPreviewToEditor: () => void;
+  saveFileHandler: () => Promise<void>;
 }

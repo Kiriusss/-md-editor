@@ -1,12 +1,14 @@
 /**
  * MD Editor - Renderer Process
- * Handles all UI logic, markdown rendering, and IPC communication
+ * Architecture:
+ *   - Left panel (editor textarea): all editing & formatting happens here
+ *   - Right panel (preview div): read-only Markdown rendering
+ *   - Default layout: dual-pane (both visible side-by-side)
  */
 
-// Use the API exposed by preload.js via contextBridge
 const { openFile, saveFile, getCurrentFile, setCurrentFile, resizeWindow } = window.electronAPI;
 
-// ==================== Internationalization (i18n) ====================
+// ==================== i18n ====================
 
 type LocaleDict = Record<string, string>;
 
@@ -50,7 +52,6 @@ const locales: Record<string, LocaleDict> = {
     'status.errorOpen': 'Error opening file',
     'status.errorSave': 'Error saving file',
     'editor.placeholder': 'Start typing your Markdown here...',
-    'preview.placeholder': 'Click here to edit preview directly...',
     'confirm.unsaved': 'Unsaved changes. Continue anyway?',
     'prompt.url': 'Enter URL:',
     'prompt.alt': 'Enter alt text:',
@@ -97,7 +98,6 @@ const locales: Record<string, LocaleDict> = {
     'status.errorOpen': '打开文件失败',
     'status.errorSave': '保存文件失败',
     'editor.placeholder': '在此输入 Markdown 内容...',
-    'preview.placeholder': '点击此处直接编辑预览内容...',
     'confirm.unsaved': '有未保存的修改，是否继续？',
     'prompt.url': '输入网址：',
     'prompt.alt': '输入替代文本：',
@@ -107,10 +107,8 @@ const locales: Record<string, LocaleDict> = {
   },
 };
 
-// Current language (default: Chinese)
 let currentLang: string = 'zh';
 
-/** Translate a key with optional parameter replacement */
 function t(key: string, params?: Record<string, string | number>): string {
   let value = locales[currentLang][key] || key;
   if (params) {
@@ -132,56 +130,36 @@ const fileStatus = document.getElementById('file-status') as HTMLSpanElement;
 const lineCount = document.getElementById('line-count') as HTMLSpanElement;
 const wordCount = document.getElementById('word-count') as HTMLSpanElement;
 
-// State
+// ==================== State ====================
+
 let currentFile: string | null = null;
 let isDirty: boolean = false;
 let isDarkTheme: boolean = true;
-let showSourceEditor: boolean = false;
+let showSourceEditor: boolean = true;
 
-// Sync control: prevents infinite loops when syncing editor <-> preview
+window.__isDirty = false;
+
+// Sync guard: prevent editor input handler from re-rendering during programmatic updates
 let isSyncing: boolean = false;
 
-// Turndown instance for HTML -> Markdown conversion
-const turndownService = new TurndownService({
-  headingStyle: 'atx',
-  codeBlockStyle: 'fenced',
-  bulletListMarker: '-',
-  emDelimiter: '*',
-  strongDelimiter: '**',
-  linkStyle: 'inlined',
-  blankReplacement: function (content: string) {
-    return content + '\n\n';
-  },
-});
+function beginSync(): boolean {
+  if (isSyncing) return false;
+  isSyncing = true;
+  return true;
+}
 
-// Configure turndown to keep basic formatting clean
-turndownService.addRule('inlineCode', {
-  filter: function (node: Node, test: (tag: string) => boolean) {
-    return test('code') && !(node.parentElement && node.parentElement.matches('pre'));
-  },
-  replacement: function (content: string) {
-    return '`' + content + '`';
-  },
-});
+function endSync(): void {
+  isSyncing = false;
+}
 
-turndownService.addRule('listItem', {
-  filter: 'li',
-  replacement: function (content: string, node: Node) {
-    content = content.replace(/^\n+/, '').replace(/\n+$/, '');
-    const prefix = '- ' + (node.firstChild && node.firstChild.nodeName === 'I' ? ' ' : '');
-    return prefix + content + '\n';
-  },
-});
+// ==================== Language ====================
 
-// Apply current language to all UI elements
 function applyLanguage(): void {
-  // Toolbar buttons
   document.getElementById('new-file')!.textContent = t('toolbar.new');
   document.getElementById('open-file')!.textContent = t('toolbar.open');
   document.getElementById('save-file')!.textContent = t('toolbar.save');
   document.getElementById('save-as-file')!.textContent = t('toolbar.saveAs');
 
-  // Tooltips
   document.getElementById('bold')!.title = t('tip.bold');
   document.getElementById('italic')!.title = t('tip.italic');
   document.getElementById('underline')!.title = t('tip.underline');
@@ -201,69 +179,39 @@ function applyLanguage(): void {
   document.getElementById('ul')!.title = t('tip.ul');
   document.getElementById('ol')!.title = t('tip.ol');
 
-  // Editor placeholder
   editor.placeholder = t('editor.placeholder');
 
-  // Language toggle button (show the OTHER language)
   const langBtn = document.getElementById('toggle-lang')!;
-  if (currentLang === 'zh') {
-    langBtn.textContent = t('toolbar.toggleLang.en');
-  } else {
-    langBtn.textContent = t('toolbar.toggleLang.zh');
-  }
+  langBtn.textContent = currentLang === 'zh' ? t('toolbar.toggleLang.en') : t('toolbar.toggleLang.zh');
 
-  // Update source editor button if needed
   const srcBtn = document.getElementById('toggle-source')!;
-  if (showSourceEditor) {
-    srcBtn.textContent = t('toolbar.toggleSource.hide');
-  } else {
-    srcBtn.textContent = t('toolbar.toggleSource.show');
-  }
+  srcBtn.textContent = showSourceEditor ? t('toolbar.toggleSource.hide') : t('toolbar.toggleSource.show');
 
-  // Sync button
   document.getElementById('sync-both')!.textContent = t('toolbar.sync');
 
-  // Update status bar if no file operations pending
-  if (!isDirty) {
-    fileStatus.textContent = t('status.ready');
-  }
+  if (!isDirty) fileStatus.textContent = t('status.ready');
 }
 
-// Toggle language
 function toggleLanguage(): void {
   currentLang = currentLang === 'zh' ? 'en' : 'zh';
   applyLanguage();
-  updateWordCountFromPreview();
+  updateWordCount();
 }
 
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
-  applyLanguage();
-  initEditor();
-  initPreviewEditor();
-  initToolbar();
-  initDivider();
-  initKeyboardShortcuts();
-  updatePreview();
-});
-
-// ==================== Editor Functions ====================
+// ==================== Editor ====================
 
 function initEditor(): void {
   editor.addEventListener('input', () => {
-    if (!isSyncing) {
-      isSyncing = true;
-      updatePreview();
-      markAsDirty();
-      updateStatus();
-      setTimeout(() => { isSyncing = false; }, 50);
-    }
+    if (isSyncing) return;
+    updatePreview();
+    markAsDirty();
+    updateStatus();
   });
 
   editor.addEventListener('keyup', updateLineCol);
   editor.addEventListener('click', updateLineCol);
 
-  // Handle tab key
+  // Tab key inserts 4 spaces
   editor.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -275,111 +223,120 @@ function initEditor(): void {
   });
 }
 
-// ==================== Editable Preview Functions ====================
+// ==================== Preview (read-only rendering) ====================
 
-let previewIsUserEditing: boolean = false;
+/**
+ * Configure Marked to track source line numbers via data-sourcepos attribute.
+ * Each rendered block gets a data-sourcepos attribute like "1-3" (startLine-endLine).
+ * We use this to implement double-click-to-jump.
+ */
+// Marked 4.x+ supports marked.use() with sourcePos option for line tracking
+// We cast to any because the TypeScript types may not include this option
+(marked as any).use?.({ sourcePos: true });
 
-function syncPreviewToEditor(): void {
-  if (!isSyncing && preview.innerHTML.trim()) {
-    isSyncing = true;
-    const html = preview.innerHTML;
-    const markdown = turndownService.turndown(html);
-    editor.value = markdown;
-    markAsDirty();
-    updateStatus();
-    setTimeout(() => { isSyncing = false; }, 50);
-  }
-}
-
-function updateWordCountFromPreview(): void {
-  const text = preview.innerText || preview.textContent || '';
-  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-  wordCount.textContent = t('status.words', { count: words });
-}
-
-function initPreviewEditor(): void {
-  preview.setAttribute('contenteditable', 'true');
-
-  preview.addEventListener('focus', () => {
-    previewIsUserEditing = true;
-  });
-
-  preview.addEventListener('blur', () => {
-    setTimeout(() => {
-      if (!previewIsUserEditing) {
-        syncPreviewToEditor();
-      }
-      previewIsUserEditing = false;
-    }, 500);
-  });
-
-  // Listen for input changes in preview
-  preview.addEventListener('input', () => {
-    if (!isSyncing) {
-      isSyncing = true;
-      markAsDirty();
-      updateWordCountFromPreview();
-      if (showSourceEditor) {
-        editor.value = turndownService.turndown(preview.innerHTML);
-        updateLineCol();
-      }
-      setTimeout(() => { isSyncing = false; }, 50);
-    }
-  });
-
-  // Listen for mutations in preview (for paste, format operations)
-  const mutationObserver = new MutationObserver(() => {
-    if (!isSyncing && previewIsUserEditing) {
-      isSyncing = true;
-      markAsDirty();
-      updateWordCountFromPreview();
-      if (showSourceEditor) {
-        editor.value = turndownService.turndown(preview.innerHTML);
-        updateLineCol();
-      }
-      setTimeout(() => { isSyncing = false; }, 50);
-    }
-  });
-
-  mutationObserver.observe(preview, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-  });
-}
-
-// Sync editor markdown -> preview HTML
 function updatePreview(): void {
-  const isUserEditingPreview = previewIsUserEditing && document.activeElement === preview;
-  if (!isUserEditingPreview) {
-    preview.innerHTML = marked.parse(editor.value);
+  preview.innerHTML = marked.parse(editor.value) as string;
+}
+
+/**
+ * Find the nearest ancestor element that has a data-sourcepos attribute.
+ * Returns the starting line number (1-based) or null.
+ */
+function getSourceLineFromElement(target: EventTarget | null): number | null {
+  let current: Node | null = target as Node | null;
+  while (current && current !== preview) {
+    if (current.nodeType === Node.ELEMENT_NODE) {
+      const sourcepos = (current as Element).getAttribute('data-sourcepos');
+      if (sourcepos) {
+        const startLine = parseInt(sourcepos.split('-')[0], 10);
+        if (!isNaN(startLine)) return startLine;
+      }
+    }
+    current = current.parentNode;
+  }
+  return null;
+}
+
+/**
+ * Jump the editor cursor to a specific line number and briefly highlight the line.
+ */
+function jumpToSourceLine(lineNumber: number): void {
+  const text = editor.value;
+  const lines = text.split('\n');
+
+  // Clamp to valid range
+  lineNumber = Math.max(1, Math.min(lineNumber, lines.length));
+
+  // Calculate character offset for the start of the target line
+  let offset = 0;
+  for (let i = 0; i < lineNumber - 1; i++) {
+    offset += lines[i].length + 1; // +1 for the newline character
+  }
+
+  // Set cursor position and select the entire line
+  editor.focus();
+  editor.selectionStart = offset;
+  editor.selectionEnd = offset + lines[lineNumber - 1].length;
+
+  // Scroll editor to show the line
+  // Estimate line height and scroll to the target line
+  const lineHeight = 24; // approximate px per line (matches font-size 15px * line-height 1.6)
+  const editorScrollTop = editor.scrollTop;
+  const visibleLines = Math.floor(editor.clientHeight / lineHeight);
+
+  // Calculate which "visible line" the target corresponds to
+  const textLinesAbove = text.substring(0, offset).split('\n').length;
+  const targetScrollPos = Math.max(0, (textLinesAbove - Math.floor(visibleLines / 2)) * lineHeight);
+
+  editor.scrollTop = targetScrollPos;
+
+  // Ensure editor panel is visible
+  if (!editorPanel.classList.contains('visible')) {
+    editorPanel.classList.add('visible');
+    divider.classList.add('visible');
+  }
+
+  // Brief visual flash on the editor to draw attention
+  editor.style.boxShadow = '0 0 0 3px #007acc';
+  setTimeout(() => {
+    editor.style.boxShadow = '';
+  }, 600);
+}
+
+/**
+ * Handle double-click on preview: jump to corresponding source line.
+ */
+function handlePreviewDoubleClick(e: MouseEvent): void {
+  const target = e.target;
+  const line = getSourceLineFromElement(target);
+  if (line !== null) {
+    jumpToSourceLine(line);
   }
 }
 
-// Sync preview HTML -> editor markdown, then re-render preview
-function syncEditorToPreview(): void {
-  if (!isSyncing) {
-    isSyncing = true;
-    preview.innerHTML = marked.parse(editor.value);
-    setTimeout(() => { isSyncing = false; }, 50);
-  }
-}
+// ==================== Dirty / Status ====================
 
 function markAsDirty(): void {
   isDirty = true;
+  window.__isDirty = true;
   document.title = t('app.title.modified');
 }
 
 function markAsClean(): void {
   isDirty = false;
+  window.__isDirty = false;
   document.title = t('app.title');
 }
 
 function updateStatus(): void {
+  updateWordCount();
+  updateLineCol();
+}
+
+function updateWordCount(): void {
   const text = editor.value;
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
   wordCount.textContent = t('status.words', { count: words });
-  updateLineCol();
 }
 
 function updateLineCol(): void {
@@ -391,194 +348,129 @@ function updateLineCol(): void {
   lineCount.textContent = t('status.lineCol', { line, col });
 }
 
-// ==================== Helper: apply format via markdown sync ====================
+// ==================== Editor Helpers ====================
 
-function insertMarkdownAtCursor(mdText: string): void {
-  preview.focus();
-  const html = marked.parse(mdText);
-  document.execCommand('insertHTML', false, html);
-  markAsDirty();
-  updateWordCountFromPreview();
-}
-
-function wrapSelectionWithMarkdown(before: string, after: string): void {
-  preview.focus();
-  const sel = window.getSelection()!;
-  const selectedText = sel.toString();
-  if (sel.rangeCount > 0 && !sel.isCollapsed) {
-    const md = before + selectedText + after;
-    const html = marked.parse(md);
-    document.execCommand('insertHTML', false, html);
-  } else {
-    const md = before + after;
-    insertMarkdownAtCursor(md);
+/** Wrap the current selection with before/after strings. */
+function wrapSelection(before: string, after: string): void {
+  editor.focus();
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+  const selected = editor.value.substring(start, end);
+  const replacement = before + selected + after;
+  editor.value = editor.value.substring(0, start) + replacement + editor.value.substring(end);
+  editor.selectionStart = start + before.length;
+  editor.selectionEnd = start + before.length + selected.length;
+  // Fire input event to update preview
+  if (!beginSync()) return;
+  try {
+    editor.dispatchEvent(new Event('input'));
+  } finally {
+    endSync();
   }
-  markAsDirty();
-  updateWordCountFromPreview();
 }
 
-// ==================== Toolbar Functions ====================
+/** Insert text at cursor position. */
+function insertAtCursor(text: string): void {
+  editor.focus();
+  const start = editor.selectionStart;
+  editor.value = editor.value.substring(0, start) + text + editor.value.substring(editor.selectionEnd);
+  editor.selectionStart = editor.selectionEnd = start + text.length;
+  if (!beginSync()) return;
+  try {
+    editor.dispatchEvent(new Event('input'));
+  } finally {
+    endSync();
+  }
+}
+
+/** Insert a heading prefix at the start of the current line. */
+function insertHeading(prefix: string): void {
+  editor.focus();
+  const pos = editor.selectionStart;
+  const lineStart = editor.value.lastIndexOf('\n', pos - 2) + 1;
+  editor.value = editor.value.substring(0, lineStart) + prefix + editor.value.substring(lineStart);
+  editor.selectionStart = editor.selectionEnd = pos + prefix.length;
+  if (!beginSync()) return;
+  try {
+    editor.dispatchEvent(new Event('input'));
+  } finally {
+    endSync();
+  }
+}
+
+function insertLinkMd(): void {
+  const url = prompt(t('prompt.url'), t('prompt.defaultUrl'));
+  if (url) {
+    const alt = prompt(t('prompt.alt'), t('prompt.defaultAlt') ?? 'link');
+    insertAtCursor(`[${alt || 'link'}](${url})`);
+  }
+}
+
+function insertImageMd(): void {
+  const url = prompt(t('prompt.url'), t('prompt.defaultUrl'));
+  if (url) {
+    const alt = prompt(t('prompt.alt'), t('prompt.defaultAlt'));
+    insertAtCursor(`![${alt || 'image'}](${url})`);
+  }
+}
+
+function insertTableMd(): void {
+  insertAtCursor(`| Header 1 | Header 2 | Header 3 |
+|----------|----------|----------|
+| Cell 1   | Cell 2   | Cell 3   |
+| Cell 4   | Cell 5   | Cell 6   |`);
+}
+
+function insertCheckboxMd(): void {
+  insertAtCursor(`- [ ] Task 1
+- [ ] Task 2
+- [ ] Task 3`);
+}
+
+// ==================== Toolbar ====================
 
 function initToolbar(): void {
-  // File operations
   document.getElementById('new-file')!.addEventListener('click', createNewFile);
   document.getElementById('open-file')!.addEventListener('click', openFileHandler);
   document.getElementById('save-file')!.addEventListener('click', saveFileHandler);
   document.getElementById('save-as-file')!.addEventListener('click', saveAsFileHandler);
 
-  // Text formatting
-  document.getElementById('bold')!.addEventListener('click', () => {
-    preview.focus();
-    document.execCommand('bold', false);
-    markAsDirty(); updateWordCountFromPreview();
-  });
-  document.getElementById('italic')!.addEventListener('click', () => {
-    preview.focus();
-    document.execCommand('italic', false);
-    markAsDirty(); updateWordCountFromPreview();
-  });
-  document.getElementById('underline')!.addEventListener('click', () => {
-    preview.focus();
-    document.execCommand('underline', false);
-    markAsDirty(); updateWordCountFromPreview();
-  });
-  document.getElementById('strikethrough')!.addEventListener('click', () => {
-    preview.focus();
-    document.execCommand('strikeThrough', false);
-    markAsDirty(); updateWordCountFromPreview();
-  });
-  document.getElementById('highlight')!.addEventListener('click', () => {
-    preview.focus();
-    document.execCommand('hiliteColor', false, '#ffff00');
-    markAsDirty(); updateWordCountFromPreview();
-  });
+  // Formatting — always operates on the editor
+  document.getElementById('bold')!.addEventListener('click', () => wrapSelection('**', '**'));
+  document.getElementById('italic')!.addEventListener('click', () => wrapSelection('*', '*'));
+  document.getElementById('underline')!.addEventListener('click', () => wrapSelection('<u>', '</u>'));
+  document.getElementById('strikethrough')!.addEventListener('click', () => wrapSelection('~~', '~~'));
+  document.getElementById('highlight')!.addEventListener('click', () => wrapSelection('<mark>', '</mark>'));
 
-  // Headings
-  document.getElementById('h1')!.addEventListener('click', () => applyHeading('h1'));
-  document.getElementById('h2')!.addEventListener('click', () => applyHeading('h2'));
-  document.getElementById('h3')!.addEventListener('click', () => applyHeading('h3'));
+  document.getElementById('h1')!.addEventListener('click', () => insertHeading('# '));
+  document.getElementById('h2')!.addEventListener('click', () => insertHeading('## '));
+  document.getElementById('h3')!.addEventListener('click', () => insertHeading('### '));
 
-  // Code
-  document.getElementById('code-inline')!.addEventListener('click', insertInlineCode);
-  document.getElementById('code-block')!.addEventListener('click', insertCodeBlock);
-  document.getElementById('blockquote')!.addEventListener('click', insertBlockquote);
-  document.getElementById('horizontal-rule')!.addEventListener('click', insertHorizontalRule);
+  document.getElementById('code-inline')!.addEventListener('click', () => wrapSelection('`', '`'));
+  document.getElementById('code-block')!.addEventListener('click', () => insertAtCursor('```\nyour code here\n```'));
+  document.getElementById('blockquote')!.addEventListener('click', () => insertAtCursor('> '));
+  document.getElementById('horizontal-rule')!.addEventListener('click', () => insertAtCursor('\n---\n'));
 
-  // Insert elements
-  document.getElementById('link')!.addEventListener('click', insertLink);
-  document.getElementById('image')!.addEventListener('click', insertImage);
-  document.getElementById('table')!.addEventListener('click', insertTable);
-  document.getElementById('checkbox')!.addEventListener('click', insertCheckboxList);
+  document.getElementById('link')!.addEventListener('click', () => insertLinkMd());
+  document.getElementById('image')!.addEventListener('click', () => insertImageMd());
+  document.getElementById('table')!.addEventListener('click', () => insertTableMd());
+  document.getElementById('checkbox')!.addEventListener('click', () => insertCheckboxMd());
 
-  // Lists
-  document.getElementById('ul')!.addEventListener('click', () => {
-    preview.focus();
-    document.execCommand('insertUnorderedList', false);
-    markAsDirty(); updateWordCountFromPreview();
-  });
-  document.getElementById('ol')!.addEventListener('click', () => {
-    preview.focus();
-    document.execCommand('insertOrderedList', false);
-    markAsDirty(); updateWordCountFromPreview();
-  });
+  document.getElementById('ul')!.addEventListener('click', () => insertAtCursor('\n- item\n'));
+  document.getElementById('ol')!.addEventListener('click', () => insertAtCursor('\n1. item\n'));
 
-  // View controls
   document.getElementById('toggle-source')!.addEventListener('click', toggleSourceEditor);
-  document.getElementById('sync-both')!.addEventListener('click', syncBoth);
+  document.getElementById('sync-both')!.addEventListener('click', updatePreview);
   document.getElementById('toggle-theme')!.addEventListener('click', toggleTheme);
   document.getElementById('toggle-lang')!.addEventListener('click', toggleLanguage);
-}
-
-// --- Format functions (operate on preview contenteditable) ---
-
-function applyHeading(tag: string): void {
-  preview.focus();
-  document.execCommand('formatBlock', false, '<' + tag + '>');
-  markAsDirty();
-  updateWordCountFromPreview();
-}
-
-function insertInlineCode(): void {
-  preview.focus();
-  const sel = window.getSelection()!;
-  const text = sel.toString() || 'code';
-  const codeEl = document.createElement('code');
-  codeEl.textContent = text;
-  document.execCommand('insertHTML', false, codeEl.outerHTML);
-  markAsDirty();
-  updateWordCountFromPreview();
-}
-
-function insertCodeBlock(): void {
-  preview.focus();
-  const codeHtml = '<pre><code>your code here</code></pre><p><br></p>';
-  document.execCommand('insertHTML', false, codeHtml);
-  markAsDirty();
-  updateWordCountFromPreview();
-}
-
-function insertBlockquote(): void {
-  preview.focus();
-  document.execCommand('formatBlock', false, '<blockquote>');
-  markAsDirty();
-  updateWordCountFromPreview();
-}
-
-function insertHorizontalRule(): void {
-  preview.focus();
-  document.execCommand('insertHTML', false, '<hr>');
-  markAsDirty();
-  updateWordCountFromPreview();
-}
-
-function insertLink(): void {
-  preview.focus();
-  const url = prompt(t('prompt.url'), t('prompt.defaultUrl'));
-  if (url) {
-    document.execCommand('createLink', false, url);
-    markAsDirty();
-    updateWordCountFromPreview();
-  }
-}
-
-function insertImage(): void {
-  preview.focus();
-  const url = prompt(t('prompt.url'), t('prompt.defaultUrl'));
-  if (url) {
-    const alt = prompt(t('prompt.alt'), t('prompt.defaultAlt'));
-    const imgHtml = `<img src="${url}" alt="${alt || t('prompt.defaultAlt')}">`;
-    document.execCommand('insertHTML', false, imgHtml);
-    markAsDirty();
-    updateWordCountFromPreview();
-  }
-}
-
-function insertTable(): void {
-  preview.focus();
-  const tableHtml = '<table><thead><tr><th>Header 1</th><th>Header 2</th><th>Header 3</th></tr></thead><tbody><tr><td>Cell 1</td><td>Cell 2</td><td>Cell 3</td></tr><tr><td>Cell 4</td><td>Cell 5</td><td>Cell 6</td></tr></tbody></table><p><br></p>';
-  document.execCommand('insertHTML', false, tableHtml);
-  markAsDirty();
-  updateWordCountFromPreview();
-}
-
-function insertCheckboxList(): void {
-  preview.focus();
-  const checkboxHtml = '<div><input type="checkbox" disabled> Task 1</div><div><input type="checkbox" disabled> Task 2</div><div><input type="checkbox" disabled> Task 3</div><p><br></p>';
-  document.execCommand('insertHTML', false, checkboxHtml);
-  markAsDirty();
-  updateWordCountFromPreview();
 }
 
 // ==================== File Operations ====================
 
 async function createNewFile(): Promise<void> {
-  if (isDirty && (editor.value.trim() || preview.innerHTML.trim())) {
-    const shouldContinue = confirm(t('confirm.unsaved'));
-    if (!shouldContinue) return;
+  if (isDirty && editor.value.trim()) {
+    if (!confirm(t('confirm.unsaved'))) return;
   }
-
-  syncPreviewToEditor();
-
   editor.value = '';
   preview.innerHTML = '';
   currentFile = null;
@@ -586,7 +478,6 @@ async function createNewFile(): Promise<void> {
   fileStatus.textContent = t('status.newFile');
   updatePreview();
   updateStatus();
-  updateWordCountFromPreview();
 }
 
 async function openFileHandler(): Promise<void> {
@@ -643,21 +534,6 @@ async function saveToFile(filePath: string): Promise<void> {
 
 // ==================== View Controls ====================
 
-function syncBoth(): void {
-  if (!isSyncing) {
-    isSyncing = true;
-    const inPreview = document.activeElement === preview;
-    if (inPreview) {
-      editor.value = turndownService.turndown(preview.innerHTML);
-      updateLineCol();
-    }
-    preview.innerHTML = marked.parse(editor.value);
-    markAsDirty();
-    updateWordCountFromPreview();
-    setTimeout(() => { isSyncing = false; }, 50);
-  }
-}
-
 function toggleTheme(): void {
   isDarkTheme = !isDarkTheme;
   document.body.className = isDarkTheme ? 'dark-theme' : 'light-theme';
@@ -672,10 +548,8 @@ function toggleSourceEditor(): void {
     editorPanel.classList.add('visible');
     divider.classList.add('visible');
     btn.textContent = t('toolbar.toggleSource.hide');
-    syncPreviewToEditor();
     resizeWindow(1400, 900);
   } else {
-    syncPreviewToEditor();
     editorPanel.classList.remove('visible');
     divider.classList.remove('visible');
     btn.textContent = t('toolbar.toggleSource.show');
@@ -698,7 +572,7 @@ function initDivider(): void {
     const container = document.querySelector('.main-content') as HTMLElement;
     const containerRect = container.getBoundingClientRect();
     const newEditorWidth = e.clientX - containerRect.left;
-    const totalWidth = containerRect.width - 4; // minus divider width
+    const totalWidth = containerRect.width - 4;
 
     const editorPercent = (newEditorWidth / totalWidth) * 100;
     const previewPercent = 100 - editorPercent;
@@ -719,33 +593,22 @@ function initDivider(): void {
 
 function initKeyboardShortcuts(): void {
   document.addEventListener('keydown', (e: KeyboardEvent) => {
-    // Ctrl+S / Cmd+S
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
-      syncPreviewToEditor();
       saveFileHandler();
     }
-
-    // Ctrl+Shift+S / Cmd+Shift+S
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') {
       e.preventDefault();
-      syncPreviewToEditor();
       saveAsFileHandler();
     }
-
-    // Ctrl+O / Cmd+O
     if ((e.ctrlKey || e.metaKey) && e.key === 'o') {
       e.preventDefault();
       openFileHandler();
     }
-
-    // Ctrl+N / Cmd+N
     if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
       e.preventDefault();
       createNewFile();
     }
-
-    // Ctrl+\ to toggle source editor
     if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
       e.preventDefault();
       toggleSourceEditor();
@@ -753,10 +616,25 @@ function initKeyboardShortcuts(): void {
   });
 }
 
-// Warn before closing with unsaved changes
-window.addEventListener('beforeunload', (e: BeforeUnloadEvent) => {
-  if (isDirty) {
-    e.preventDefault();
-    e.returnValue = '';
-  }
+// ==================== Expose for main process ====================
+
+window.saveFileHandler = saveFileHandler;
+
+// ==================== Initialize ====================
+
+document.addEventListener('DOMContentLoaded', () => {
+  applyLanguage();
+  initEditor();
+  initToolbar();
+  initDivider();
+  initKeyboardShortcuts();
+
+  // Double-click preview to jump to source
+  preview.addEventListener('dblclick', handlePreviewDoubleClick);
+
+  // Default dual-pane: show editor + preview side by side
+  editorPanel.classList.add('visible');
+  divider.classList.add('visible');
+
+  updatePreview();
 });

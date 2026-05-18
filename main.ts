@@ -14,7 +14,7 @@ let currentFilePath: string | null = null;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 800,
+    width: 1400,
     height: 900,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -31,7 +31,6 @@ function createWindow(): void {
   mainWindow.show();
 }
 
-app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -92,4 +91,46 @@ ipcMain.handle('resize-window', (_event, { width, height }: { width: number; hei
     mainWindow.setSize(width, height);
     mainWindow.center();
   }
+});
+
+// --- Word-style close confirmation ---
+
+let closeHandlerAttached = false;
+
+function attachCloseHandler(): void {
+  if (closeHandlerAttached || !mainWindow) return;
+  closeHandlerAttached = true;
+
+  mainWindow.on('close', async (event) => {
+    // Check dirty flag exposed on window by renderer
+    const isDirty = await mainWindow!.webContents.executeJavaScript('window.__isDirty');
+    if (isDirty) {
+      event.preventDefault();
+      const result = await dialog.showMessageBox(mainWindow!, {
+        type: 'question',
+        buttons: ['保存', '不保存', '取消'],
+        message: '是否保存对文档的更改？',
+        detail: '如果不保存，所有更改将丢失。',
+      });
+      if (result.response === 0) {
+        // Save — editor is authoritative, just save
+        await mainWindow!.webContents.executeJavaScript(`
+          (async () => {
+            await saveFileHandler();
+          })();
+        `);
+        // Allow save to complete
+        await new Promise(r => setTimeout(r, 1500));
+        mainWindow!.close();
+      } else if (result.response === 1) {
+        mainWindow!.close();
+      }
+    }
+  });
+}
+
+// Attach after window is ready
+app.whenReady().then(() => {
+  createWindow();
+  setTimeout(attachCloseHandler, 500); // ensure window is fully created
 });
