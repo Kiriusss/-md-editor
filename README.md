@@ -1,6 +1,6 @@
 # MD Editor
 
-一款基于 **Electron** 构建的现代化类 Word Markdown 文档编辑器。支持在预览面板中直接编辑内容，并双向同步至 Markdown 源码。
+一款基于 **Electron** 构建的现代化所见即所得 Markdown 文档编辑器。使用 **TypeScript** 编写，支持在预览面板中直接编辑内容，并双向同步至 Markdown 源码。
 
 ## 功能特性
 
@@ -9,8 +9,9 @@
 - **双向同步** — 预览区的修改自动同步到 Markdown 源码，源码修改实时更新预览
 - **深色/浅色主题** — 一键切换主题
 - **源码编辑器** — 可选显示/编辑原始 Markdown
-- **文件操作** — 新建、打开、保存、另存为，支持拖拽文件
+- **文件操作** — 新建、打开、保存、另存为
 - **键盘快捷键** — 常用操作均支持快捷键
+- **中英文切换** — 界面支持中英文双语言
 - **未保存提醒** — 关闭前自动检测未保存的修改
 
 ## 快速开始
@@ -36,10 +37,23 @@ npm install
 npm start
 ```
 
-### 打包发布
+此命令会先编译 TypeScript，然后启动 Electron 应用。
+
+### 编译
 
 ```bash
+# 仅编译 TypeScript（不启动应用）
+npm run compile
+```
+
+### 打包
+
+```bash
+# 构建 Windows 安装包 (electron-builder)
 npm run build
+
+# 构建 Windows 便携版 (electron-packager)
+npm run build:win
 ```
 
 ## 使用说明
@@ -80,8 +94,6 @@ npm run build
 - 直接编辑 Markdown 源码
 - 实时预览更新
 
-点击 **"隐藏源码"** 返回所见即所得编辑模式。
-
 ### 文件操作
 
 - **新建** — 创建空白文档
@@ -93,10 +105,14 @@ npm run build
 
 ```
 md-editor/
-├── main.js          # Electron 主进程
-├── preload.js       # 预加载脚本（上下文桥接）
-├── renderer.js      # 渲染进程（所有 UI 逻辑）
+├── main.ts          # Electron 主进程
+├── preload.ts       # 预加载脚本（上下文桥接）
+├── renderer.ts      # 渲染进程（所有 UI 逻辑）
 ├── index.html       # 主页面模板
+├── tsconfig.json    # TypeScript 配置
+├── types/
+│   └── global.d.ts  # 全局类型声明
+├── build/           # TypeScript 编译输出（.gitignore）
 ├── package.json     # 项目配置
 ├── README.md        # 本文件
 └── styles/
@@ -107,6 +123,7 @@ md-editor/
 ## 技术栈
 
 - [Electron](https://www.electronjs.org/) — 跨平台桌面应用框架
+- [TypeScript](https://www.typescriptlang.org/) — 类型安全的 JavaScript
 - [Marked](https://marked.js.org/) — Markdown 解析器
 - [Turndown](https://github.com/mixmark-io/turndown) — HTML 转 Markdown 转换器
 - ContentEditable — 浏览器原生富文本编辑
@@ -114,8 +131,6 @@ md-editor/
 ## AI 驱动声明
 
 本项目**完全由 AI 编写**，由在单张 RTX 5090 上运行的 **Qwen3.6-27B-NVFP4-Q4_K_M.gguf** 模型驱动。
-
-做这个项目的主要目的就是测试低参数模型目前的代码能力。
 
 从项目搭建、功能实现、UI 设计、国际化支持到 Bug 修复，所有代码均由该模型独立完成。
 

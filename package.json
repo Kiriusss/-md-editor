@@ -2,16 +2,48 @@
   "name": "md-editor",
   "version": "1.0.0",
   "description": "A modern Markdown document editor built with Electron",
-  "main": "main.js",
+  "main": "build/main.js",
   "scripts": {
-    "start": "electron .",
-    "build": "electron-builder"
-  },
-  "dependencies": {
-    "electron": "^28.0.0"
+    "compile": "tsc",
+    "start": "tsc && electron .",
+    "build": "tsc && electron-builder",
+    "build:win": "tsc && npx electron-packager . \"MD Editor\" --platform=win32 --arch=x64 --out=dist --overwrite"
   },
   "devDependencies": {
-    "electron-builder": "^24.0.0"
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "electron-packager": "^17.1.2",
+    "typescript": "^6.0.3"
+  },
+  "build": {
+    "appId": "com.md-editor.app",
+    "productName": "MD Editor",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "renderer.js",
+      "styles/**",
+      "locale/**",
+      "node_modules/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "author": "",
   "license": "MIT"
