@@ -6,7 +6,7 @@
  *   - Default layout: dual-pane (both visible side-by-side)
  */
 
-const { openFile, saveFile, getCurrentFile, setCurrentFile, resizeWindow } = window.electronAPI;
+const { openFile, saveFile, getCurrentFile, setCurrentFile, resizeWindow, selectImage } = window.electronAPI;
 
 // ==================== i18n ====================
 
@@ -415,15 +415,18 @@ function insertLinkMd(): void {
   }
 }
 
-function insertImageMd(): void {
-  // Insert image template at cursor, select the alt text for easy editing
+async function insertImageMd(): Promise<void> {
+  // Open file dialog to select a local image
+  const imagePath = await selectImage();
+  if (!imagePath) return;
+
   editor.focus();
   const start = editor.selectionStart;
-  const template = '![alt text](https://)';
+  // Use relative path if image is in the same directory as current file, otherwise use absolute path
+  const altText = imagePath.split(pathSep).pop() || 'image';
+  const template = `![${altText}](${imagePath})`;
   editor.value = editor.value.substring(0, start) + template + editor.value.substring(editor.selectionEnd);
-  // Select "alt text" so user can immediately type to replace it
-  editor.selectionStart = start + 2;
-  editor.selectionEnd = start + 10;
+  editor.selectionStart = editor.selectionEnd = start + template.length;
   if (!beginSync()) return;
   try {
     editor.dispatchEvent(new Event('input'));
@@ -431,6 +434,8 @@ function insertImageMd(): void {
     endSync();
   }
 }
+
+const pathSep = navigator.platform.includes('Win') ? '\\' : '/';
 
 function insertTableMd(): void {
   insertAtCursor(`| Header 1 | Header 2 | Header 3 |

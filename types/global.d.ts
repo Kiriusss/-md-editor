@@ -1,4 +1,4 @@
-// Type declarations for CDN-loaded libraries
+ // Type declarations for CDN-loaded libraries
 
 declare const marked: {
   parse(markdown: string): string;
@@ -27,6 +27,7 @@ interface ElectronAPI {
   getCurrentFile: () => Promise<string | null>;
   setCurrentFile: (filePath: string) => Promise<{ success: boolean }>;
   resizeWindow: (width: number, height: number) => Promise<void>;
+  selectImage: () => Promise<string | null>;
 }
 
 interface Window {

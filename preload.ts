@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resizeWindow: (width: number, height: number) => ipcRenderer.invoke('resize-window', { width, height }),
   checkDirty: () => ipcRenderer.invoke('check-dirty'),
   requestSave: () => ipcRenderer.invoke('request-save'),
+  selectImage: () => ipcRenderer.invoke('select-image'),
 });

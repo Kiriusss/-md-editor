@@ -93,6 +93,19 @@ ipcMain.handle('resize-window', (_event, { width, height }: { width: number; hei
   }
 });
 
+ipcMain.handle('select-image', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    filters: [
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'] }
+    ],
+    properties: ['openFile'],
+  });
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  return null;
+});
+
 // --- Word-style close confirmation ---
 
 let closeHandlerAttached = false;
