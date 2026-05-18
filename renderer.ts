@@ -399,18 +399,36 @@ function insertHeading(prefix: string): void {
 }
 
 function insertLinkMd(): void {
-  const url = prompt(t('prompt.url'), t('prompt.defaultUrl'));
-  if (url) {
-    const alt = prompt(t('prompt.alt'), t('prompt.defaultAlt') ?? 'link');
-    insertAtCursor(`[${alt || 'link'}](${url})`);
+  // Insert link template at cursor, select the text label for easy editing
+  editor.focus();
+  const start = editor.selectionStart;
+  const template = '[link text](https://)';
+  editor.value = editor.value.substring(0, start) + template + editor.value.substring(editor.selectionEnd);
+  // Select "link text" so user can immediately type to replace it
+  editor.selectionStart = start + 1;
+  editor.selectionEnd = start + 9;
+  if (!beginSync()) return;
+  try {
+    editor.dispatchEvent(new Event('input'));
+  } finally {
+    endSync();
   }
 }
 
 function insertImageMd(): void {
-  const url = prompt(t('prompt.url'), t('prompt.defaultUrl'));
-  if (url) {
-    const alt = prompt(t('prompt.alt'), t('prompt.defaultAlt'));
-    insertAtCursor(`![${alt || 'image'}](${url})`);
+  // Insert image template at cursor, select the alt text for easy editing
+  editor.focus();
+  const start = editor.selectionStart;
+  const template = '![alt text](https://)';
+  editor.value = editor.value.substring(0, start) + template + editor.value.substring(editor.selectionEnd);
+  // Select "alt text" so user can immediately type to replace it
+  editor.selectionStart = start + 2;
+  editor.selectionEnd = start + 10;
+  if (!beginSync()) return;
+  try {
+    editor.dispatchEvent(new Event('input'));
+  } finally {
+    endSync();
   }
 }
 
